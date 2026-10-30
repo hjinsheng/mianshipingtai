@@ -325,14 +325,23 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements Us
         int currentYear = LocalDate.now().getYear();
 
         if (year == currentYear) {
-            // 当前年份：走 Redis
-            return getSignInFromRedis(userId, year);
+            // 当前年份：优先走 Redis
+            List<Integer> redisResult = getSignInFromRedis(userId, year);
+            if (!redisResult.isEmpty()) {
+                return redisResult;
+            }
+            // Redis 为空，可能是新用户，也可能是数据丢失，查 MySQL 兜底
+            List<Integer> mysqlResult = userSignInService.getSignInDaysOfYear(userId, year);
+            if (mysqlResult.isEmpty()) {
+                log.info("用户 {} 当前年份无签到记录（Redis 和 MySQL 均为空）", userId);
+            } else {
+                log.warn("用户 {} Redis 签到数据丢失，已从 MySQL 降级恢复", userId);
+            }
+            return mysqlResult;
         } else {
-            // 过去年份：降级查 MySQL（不回写 Redis）
+            // 过去年份：直接查 MySQL
             return userSignInService.getSignInDaysOfYear(userId, year);
         }
-
-
     }
 
     /**
