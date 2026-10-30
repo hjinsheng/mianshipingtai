@@ -7,6 +7,7 @@ import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import com.mianshipingtai.common.ErrorCode;
 import com.mianshipingtai.constant.CommonConstant;
+import com.mianshipingtai.constant.RedisConstant;
 import com.mianshipingtai.exception.BusinessException;
 import com.mianshipingtai.mapper.UserMapper;
 import com.mianshipingtai.model.dto.user.UserQueryRequest;
@@ -15,14 +16,21 @@ import com.mianshipingtai.model.enums.UserRoleEnum;
 import com.mianshipingtai.model.vo.LoginUserVO;
 import com.mianshipingtai.model.vo.UserVO;
 import com.mianshipingtai.service.UserService;
+import com.mianshipingtai.service.UserSignInService;
 import com.mianshipingtai.utils.SqlUtils;
-import java.util.ArrayList;
-import java.util.List;
+
+import java.time.Duration;
+import java.time.LocalDate;
+import java.time.Year;
+import java.util.*;
 import java.util.stream.Collectors;
+import javax.annotation.Resource;
 import javax.servlet.http.HttpServletRequest;
 import lombok.extern.slf4j.Slf4j;
 import me.chanjar.weixin.common.bean.WxOAuth2UserInfo;
 import org.apache.commons.lang3.StringUtils;
+import org.redisson.api.RBitSet;
+import org.redisson.api.RedissonClient;
 import org.springframework.beans.BeanUtils;
 import org.springframework.stereotype.Service;
 import org.springframework.util.DigestUtils;
@@ -41,6 +49,14 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements Us
      * 盐值，混淆密码
      */
     public static final String SALT = "mianshi";
+    private final RedissonClient redissonClient;
+
+    @Resource
+    private UserSignInService userSignInService;
+
+    public UserServiceImpl(RedissonClient redissonClient) {
+        this.redissonClient = redissonClient;
+    }
 
     @Override
     public long userRegister(String userAccount, String userPassword, String checkPassword) {
@@ -269,4 +285,79 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements Us
                 sortField);
         return queryWrapper;
     }
+
+    /**
+     * 添加用户登录记录
+     *
+     * @param userId
+     * @return
+     */
+    @Override
+    public boolean addUserSignIn(long userId) {
+        LocalDate date = LocalDate.now();
+        String key = RedisConstant.getUserSignInRedisKey(date.getYear(),userId);
+        RBitSet bitSet = redissonClient.getBitSet(key);
+        // 获取当前日期在一年中的第几天，作为偏移量（从1开始计数）
+        int dayOfYear = date.getDayOfYear();
+        if(!bitSet.get(dayOfYear)){
+            bitSet.set(dayOfYear, true);
+        }
+
+        // 每次签到刷新 TTL（到年底 + 2 天缓冲）
+        bitSet.expire(Duration.ofDays(RedisConstant.getSignInKeyTTLDays()));
+        return true;
+    }
+
+    /**
+     * 获取用户签到记录
+     *
+     * @param userId
+     * @param year
+     * @return
+     */
+    @Override
+    public List<Integer> getUserSignInRecord(long userId, Integer year) {
+        if (year == null) {
+            LocalDate date = LocalDate.now();
+            year = date.getYear();
+        }
+
+        int currentYear = LocalDate.now().getYear();
+
+        if (year == currentYear) {
+            // 当前年份：走 Redis
+            return getSignInFromRedis(userId, year);
+        } else {
+            // 过去年份：降级查 MySQL（不回写 Redis）
+            return userSignInService.getSignInDaysOfYear(userId, year);
+        }
+
+
+    }
+
+    /**
+     * 从 Redis 获取签到记录
+     *
+     * @param userId
+     * @param year
+     * @return
+     */
+    private List<Integer> getSignInFromRedis(long userId, Integer year) {
+        String key = RedisConstant.getUserSignInRedisKey(year, userId);
+        RBitSet signInBitSet = redissonClient.getBitSet(key);
+        // 加载 BitSet 到内存中，避免后续读取时发送多次请求
+        BitSet bitSet = signInBitSet.asBitSet();
+        // 统计签到的日期
+        List<Integer> dayList = new ArrayList<>();
+        // 从索引 0 开始查找下一个被设置为 1 的位
+        int index = bitSet.nextSetBit(0);
+        while (index >= 0) {
+            dayList.add(index);
+            // 查找下一个被设置为 1 的位
+            index = bitSet.nextSetBit(index + 1);
+        }
+        return dayList;
+    }
+
+
 }

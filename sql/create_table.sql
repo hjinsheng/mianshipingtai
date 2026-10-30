@@ -69,3 +69,16 @@ create table if not exists question_bank_question
     updateTime     datetime default CURRENT_TIMESTAMP not null on update CURRENT_TIMESTAMP comment '更新时间',
     UNIQUE (questionBankId, questionId)
 ) comment '题库题目' collate = utf8mb4_unicode_ci;
+
+
+-- 用户签到记录表
+CREATE TABLE IF NOT EXISTS user_sign_in
+(
+    id         BIGINT                               NOT NULL COMMENT 'id' PRIMARY KEY,
+    userId     BIGINT                               NOT NULL COMMENT '用户 id',
+    signInDate DATE                                 NOT NULL COMMENT '签到日期',
+    year       INT                                  NOT NULL COMMENT '年份（冗余，方便按年查询）',
+    createTime DATETIME DEFAULT CURRENT_TIMESTAMP   NOT NULL COMMENT '创建时间',
+    UNIQUE KEY uk_userId_date (userId, signInDate),
+    INDEX idx_userId_year (userId, year)
+) COMMENT '用户签到记录' COLLATE = utf8mb4_unicode_ci;
