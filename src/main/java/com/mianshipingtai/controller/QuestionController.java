@@ -10,10 +10,7 @@ import com.mianshipingtai.common.ResultUtils;
 import com.mianshipingtai.constant.UserConstant;
 import com.mianshipingtai.exception.BusinessException;
 import com.mianshipingtai.exception.ThrowUtils;
-import com.mianshipingtai.model.dto.question.QuestionAddRequest;
-import com.mianshipingtai.model.dto.question.QuestionEditRequest;
-import com.mianshipingtai.model.dto.question.QuestionQueryRequest;
-import com.mianshipingtai.model.dto.question.QuestionUpdateRequest;
+import com.mianshipingtai.model.dto.question.*;
 import com.mianshipingtai.model.entity.Question;
 import com.mianshipingtai.model.entity.User;
 import com.mianshipingtai.model.vo.QuestionVO;
@@ -268,6 +265,23 @@ public class QuestionController {
         Page<Question> questionPage = questionService.searchFromEs(questionQueryRequest);
         return ResultUtils.success(questionService.getQuestionVOPage(questionPage, request));
     }
+
+    /**
+     * 批量删除题目
+     *
+     * @param questionBatchDeleteRequest
+     * @param request
+     * @return
+     */
+    @PostMapping("/delete/batch")
+    @AuthCheck(mustRole = UserConstant.ADMIN_ROLE)
+    public BaseResponse<Boolean> batchDeleteQuestions(@RequestBody QuestionBatchDeleteRequest questionBatchDeleteRequest,
+                                                      HttpServletRequest request) {
+        ThrowUtils.throwIf(questionBatchDeleteRequest == null, ErrorCode.PARAMS_ERROR);
+        questionService.batchDeleteQuestions(questionBatchDeleteRequest.getQuestionIdList());
+        return ResultUtils.success(true);
+    }
+
 
 
     // endregion
