@@ -1,5 +1,6 @@
 package com.mianshipingtai.controller;
 
+import com.alibaba.csp.sentinel.Tracer;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.mianshipingtai.annotation.AuthCheck;
 import com.mianshipingtai.common.BaseResponse;
@@ -10,24 +11,13 @@ import com.mianshipingtai.config.WxOpenConfig;
 import com.mianshipingtai.constant.UserConstant;
 import com.mianshipingtai.exception.BusinessException;
 import com.mianshipingtai.exception.ThrowUtils;
-import com.mianshipingtai.model.dto.user.UserAddRequest;
-import com.mianshipingtai.model.dto.user.UserLoginRequest;
-import com.mianshipingtai.model.dto.user.UserQueryRequest;
-import com.mianshipingtai.model.dto.user.UserRegisterRequest;
-import com.mianshipingtai.model.dto.user.UserUpdateMyRequest;
-import com.mianshipingtai.model.dto.user.UserUpdateRequest;
+import com.mianshipingtai.model.dto.user.*;
 import com.mianshipingtai.model.entity.User;
 import com.mianshipingtai.model.vo.LoginUserVO;
 import com.mianshipingtai.model.vo.UserVO;
 import com.mianshipingtai.service.UserService;
-
-import java.time.LocalDate;
-import java.util.List;
-import java.util.Map;
-import javax.annotation.Resource;
-import javax.servlet.http.HttpServletRequest;
-import javax.servlet.http.HttpServletResponse;
-
+import com.mianshipingtai.utils.NetUtils;
+import com.mianshipingtai.utils.SentinelUtils;
 import lombok.extern.slf4j.Slf4j;
 import me.chanjar.weixin.common.bean.WxOAuth2UserInfo;
 import me.chanjar.weixin.common.bean.oauth2.WxOAuth2AccessToken;
@@ -35,13 +25,16 @@ import me.chanjar.weixin.mp.api.WxMpService;
 import org.apache.commons.lang3.StringUtils;
 import org.springframework.beans.BeanUtils;
 import org.springframework.util.DigestUtils;
-import org.springframework.web.bind.annotation.GetMapping;
-import org.springframework.web.bind.annotation.PostMapping;
-import org.springframework.web.bind.annotation.RequestBody;
-import org.springframework.web.bind.annotation.RequestMapping;
-import org.springframework.web.bind.annotation.RequestParam;
-import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.bind.annotation.*;
 
+import javax.annotation.Resource;
+import javax.servlet.http.HttpServletRequest;
+import javax.servlet.http.HttpServletResponse;
+import java.util.Arrays;
+import java.util.Collections;
+import java.util.List;
+
+import static com.mianshipingtai.constant.SentinelConstant.*;
 import static com.mianshipingtai.service.impl.UserServiceImpl.SALT;
 
 /**
@@ -70,7 +63,8 @@ public class UserController {
      * @return
      */
     @PostMapping("/register")
-    public BaseResponse<Long> userRegister(@RequestBody UserRegisterRequest userRegisterRequest) {
+    public BaseResponse<Long> userRegister(@RequestBody UserRegisterRequest userRegisterRequest,
+                                           HttpServletRequest request) throws Exception {
         if (userRegisterRequest == null) {
             throw new BusinessException(ErrorCode.PARAMS_ERROR);
         }
@@ -78,10 +72,17 @@ public class UserController {
         String userPassword = userRegisterRequest.getUserPassword();
         String checkPassword = userRegisterRequest.getCheckPassword();
         if (StringUtils.isAnyBlank(userAccount, userPassword, checkPassword)) {
-            return null;
+            throw new BusinessException(ErrorCode.PARAMS_ERROR);
         }
-        long result = userService.userRegister(userAccount, userPassword, checkPassword);
-        return ResultUtils.success(result);
+        // 基于 IP 限流，防恶意批量注册
+        String clientIp = NetUtils.getIpAddress(request);
+        return SentinelUtils.protect(RESOURCE_USER_REGISTER,
+                Arrays.asList((Object) clientIp),
+                () -> {
+                    long result = userService.userRegister(userAccount, userPassword, checkPassword);
+                    return ResultUtils.success(result);
+                },
+                null);
     }
 
     /**
@@ -92,7 +93,7 @@ public class UserController {
      * @return
      */
     @PostMapping("/login")
-    public BaseResponse<LoginUserVO> userLogin(@RequestBody UserLoginRequest userLoginRequest, HttpServletRequest request) {
+    public BaseResponse<LoginUserVO> userLogin(@RequestBody UserLoginRequest userLoginRequest, HttpServletRequest request) throws Exception {
         if (userLoginRequest == null) {
             throw new BusinessException(ErrorCode.PARAMS_ERROR);
         }
@@ -101,8 +102,15 @@ public class UserController {
         if (StringUtils.isAnyBlank(userAccount, userPassword)) {
             throw new BusinessException(ErrorCode.PARAMS_ERROR);
         }
-        LoginUserVO loginUserVO = userService.userLogin(userAccount, userPassword, request);
-        return ResultUtils.success(loginUserVO);
+        // IP + 账号 双维度限流，防爆破
+        String clientIp = NetUtils.getIpAddress(request);
+        return SentinelUtils.protect(RESOURCE_USER_LOGIN,
+                Arrays.asList((Object) clientIp, userAccount),
+                () -> {
+                    LoginUserVO loginUserVO = userService.userLogin(userAccount, userPassword, request);
+                    return ResultUtils.success(loginUserVO);
+                },
+                null);
     }
 
     /**
@@ -110,22 +118,31 @@ public class UserController {
      */
     @GetMapping("/login/wx_open")
     public BaseResponse<LoginUserVO> userLoginByWxOpen(HttpServletRequest request, HttpServletResponse response,
-            @RequestParam("code") String code) {
-        WxOAuth2AccessToken accessToken;
-        try {
-            WxMpService wxService = wxOpenConfig.getWxMpService();
-            accessToken = wxService.getOAuth2Service().getAccessToken(code);
-            WxOAuth2UserInfo userInfo = wxService.getOAuth2Service().getUserInfo(accessToken, code);
-            String unionId = userInfo.getUnionId();
-            String mpOpenId = userInfo.getOpenid();
-            if (StringUtils.isAnyBlank(unionId, mpOpenId)) {
-                throw new BusinessException(ErrorCode.SYSTEM_ERROR, "登录失败，系统错误");
-            }
-            return ResultUtils.success(userService.userLoginByMpOpen(userInfo, request));
-        } catch (Exception e) {
-            log.error("userLoginByWxOpen error", e);
-            throw new BusinessException(ErrorCode.SYSTEM_ERROR, "登录失败，系统错误");
-        }
+            @RequestParam("code") String code) throws Exception {
+        // 微信接口为外部依赖，加熔断保护：微信侧故障时快速失败，不挂线程
+        return SentinelUtils.protect(RESOURCE_WX_OPEN_LOGIN,
+                Collections.emptyList(),
+                () -> {
+                    WxOAuth2AccessToken accessToken;
+                    try {
+                        WxMpService wxService = wxOpenConfig.getWxMpService();
+                        accessToken = wxService.getOAuth2Service().getAccessToken(code);
+                        WxOAuth2UserInfo userInfo = wxService.getOAuth2Service().getUserInfo(accessToken, code);
+                        String unionId = userInfo.getUnionId();
+                        String mpOpenId = userInfo.getOpenid();
+                        if (StringUtils.isAnyBlank(unionId, mpOpenId)) {
+                            throw new BusinessException(ErrorCode.SYSTEM_ERROR, "登录失败，系统错误");
+                        }
+                        return ResultUtils.success(userService.userLoginByMpOpen(userInfo, request));
+                    } catch (Exception e) {
+                        // 此处所有异常均属微信登录链路故障，计入熔断统计（与通用"业务异常不计数"约定不同，故显式 trace）
+                        Tracer.trace(e);
+                        log.error("userLoginByWxOpen error", e);
+                        throw new BusinessException(ErrorCode.SYSTEM_ERROR, "登录失败，系统错误");
+                    }
+                },
+                // 熔断打开期间的降级提示
+                () -> ResultUtils.error(ErrorCode.SYSTEM_ERROR, "微信登录暂时不可用，请使用账号密码登录"));
     }
 
     /**

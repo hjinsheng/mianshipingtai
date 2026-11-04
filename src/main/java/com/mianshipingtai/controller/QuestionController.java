@@ -1,6 +1,12 @@
 package com.mianshipingtai.controller;
 
 import cn.hutool.json.JSONUtil;
+import com.alibaba.csp.sentinel.Entry;
+import com.alibaba.csp.sentinel.EntryType;
+import com.alibaba.csp.sentinel.SphU;
+import com.alibaba.csp.sentinel.Tracer;
+import com.alibaba.csp.sentinel.slots.block.BlockException;
+import com.alibaba.csp.sentinel.slots.block.degrade.DegradeException;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.mianshipingtai.annotation.AuthCheck;
 import com.mianshipingtai.common.BaseResponse;
@@ -16,6 +22,7 @@ import com.mianshipingtai.model.entity.User;
 import com.mianshipingtai.model.vo.QuestionVO;
 import com.mianshipingtai.service.QuestionService;
 import com.mianshipingtai.service.UserService;
+import com.mianshipingtai.utils.NetUtils;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.BeanUtils;
 import org.springframework.web.bind.annotation.*;
@@ -23,6 +30,8 @@ import org.springframework.web.bind.annotation.*;
 import javax.annotation.Resource;
 import javax.servlet.http.HttpServletRequest;
 import java.util.List;
+
+import static com.mianshipingtai.constant.SentinelConstant.RESOURCE_LIST_QUESTION_VO_BY_PAGE;
 
 /**
  * 题目接口
@@ -187,12 +196,67 @@ public class QuestionController {
     }
 
     /**
-     * 分页获取当前登录用户创建的题目列表
+     * 分页获取题目列表（封装类）,基于Sentinel限流和熔断
      *
      * @param questionQueryRequest
      * @param request
      * @return
      */
+    @PostMapping("/list/page/vo/sentinel")
+    public BaseResponse<Page<QuestionVO>> listQuestionVOByPageSentinel(@RequestBody QuestionQueryRequest questionQueryRequest,
+                                                               HttpServletRequest request) {
+        long current = questionQueryRequest.getCurrent();
+        long size = questionQueryRequest.getPageSize();
+        // 限制爬虫
+        ThrowUtils.throwIf(size > 20, ErrorCode.PARAMS_ERROR);
+        // 基于 IP 限流（兼容 Nginx 反向代理，优先从 x-forwarded-for 获取真实 IP）
+        String remoteAddr = NetUtils.getIpAddress(request);
+        Entry entry = null;
+        try {
+            entry = SphU.entry(RESOURCE_LIST_QUESTION_VO_BY_PAGE, EntryType.IN, 1, remoteAddr);
+            // 被保护的业务逻辑
+            // 查询数据库
+            Page<Question> questionPage = questionService.listQuestionByPage(questionQueryRequest);
+            // 获取封装类
+            return ResultUtils.success(questionService.getQuestionVOPage(questionPage, request));
+        } catch (Throwable ex) {
+            // 业务异常(先判断是否是业务异常）
+            if (!BlockException.isBlockException(ex)) {
+                Tracer.trace(ex);
+                return ResultUtils.error(ErrorCode.SYSTEM_ERROR, "系统错误");
+            }
+            // 不是业务异常则判断是否属于sentinel中的熔断异常
+            // 降级操作
+            if (ex instanceof DegradeException) {
+                return handleFallback(questionQueryRequest, request, ex);
+            }
+            // 限流操作
+            return ResultUtils.error(ErrorCode.SYSTEM_ERROR, "访问过于频繁，请稍后再试");
+        } finally {
+            if (entry != null) {
+                entry.exit(1, remoteAddr);
+            }
+        }
+    }
+
+    /**
+     * listQuestionVOByPage 降级操作：直接返回本地数据
+     */
+    public BaseResponse<Page<QuestionVO>> handleFallback(QuestionQueryRequest questionQueryRequest,
+            HttpServletRequest request, Throwable ex) {
+        // 可以返回本地数据或空数据
+        return ResultUtils.success(null);
+    }
+
+
+
+        /**
+         * 分页获取当前登录用户创建的题目列表
+         *
+         * @param questionQueryRequest
+         * @param request
+         * @return
+         */
     @PostMapping("/my/list/page/vo")
     public BaseResponse<Page<QuestionVO>> listMyQuestionVOByPage(@RequestBody QuestionQueryRequest questionQueryRequest,
                                                                  HttpServletRequest request) {

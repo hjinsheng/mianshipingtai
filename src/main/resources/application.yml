@@ -3,6 +3,16 @@
 spring:
   application:
     name: mianshipingtai
+  # Sentinel 配置
+  cloud:
+    sentinel:
+      # 启动即注册心跳到控制台，不等首次请求懒加载
+      eager: true
+      transport:
+        # Sentinel 控制台地址
+        dashboard: localhost:8131
+        # 客户端与控制台通信的 API 端口（控制台反向连客户端，需保证可达）
+        port: 8719
   # 默认 dev 环境
   profiles:
     active: dev

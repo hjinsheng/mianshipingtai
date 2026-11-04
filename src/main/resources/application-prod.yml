@@ -2,6 +2,14 @@
 server:
   port: 8101
 spring:
+  # Sentinel 配置
+  # todo 生产环境需替换为控制台实际地址；若应用跑在 Docker 内容器访问宿主机控制台，使用 host.docker.internal:8131
+  cloud:
+    sentinel:
+      eager: true
+      transport:
+        dashboard: localhost:8131
+        port: 8719
   # 数据库配置
   # todo 需替换配置
   datasource:

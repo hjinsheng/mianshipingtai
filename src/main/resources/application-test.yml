@@ -2,6 +2,13 @@
 server:
   port: 8101
 spring:
+  # Sentinel 配置
+  cloud:
+    sentinel:
+      eager: true
+      transport:
+        dashboard: localhost:8131
+        port: 8719
   # 数据库配置
   # todo 需替换配置
   datasource:

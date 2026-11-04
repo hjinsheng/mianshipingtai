@@ -1,5 +1,8 @@
 package com.mianshipingtai.controller;
 
+import com.alibaba.csp.sentinel.annotation.SentinelResource;
+import com.alibaba.csp.sentinel.slots.block.BlockException;
+import com.alibaba.csp.sentinel.slots.block.degrade.DegradeException;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.mianshipingtai.annotation.AuthCheck;
 import com.mianshipingtai.common.BaseResponse;
@@ -27,6 +30,8 @@ import org.springframework.web.bind.annotation.*;
 
 import javax.annotation.Resource;
 import javax.servlet.http.HttpServletRequest;
+
+import static com.mianshipingtai.constant.SentinelConstant.RESOURCE_LIST_QUESTION_BANK_VO_BY_PAGE;
 
 /**
  * 题库接口
@@ -185,8 +190,12 @@ public class QuestionBankController {
      * @return
      */
     @PostMapping("/list/page/vo")
-    public BaseResponse<Page<QuestionBankVO>> listQuestionBankVOByPage(@RequestBody QuestionBankQueryRequest questionBankQueryRequest,
-                                                               HttpServletRequest request) {
+    @SentinelResource(value = RESOURCE_LIST_QUESTION_BANK_VO_BY_PAGE,
+            blockHandler = "handleBlockException",
+            fallback = "handleFallback")
+    public BaseResponse<Page<QuestionBankVO>> listQuestionBankVOByPage(
+            @RequestBody QuestionBankQueryRequest questionBankQueryRequest,
+            HttpServletRequest request) {
         long current = questionBankQueryRequest.getCurrent();
         long size = questionBankQueryRequest.getPageSize();
         // 限制爬虫
@@ -255,6 +264,33 @@ public class QuestionBankController {
         ThrowUtils.throwIf(!result, ErrorCode.OPERATION_ERROR);
         return ResultUtils.success(true);
     }
+
+
+    /**
+     * listQuestionBankVOByPage 降级操作：直接返回本地数据
+     * 注意：只有业务异常才会触发降级操作（比如请求参数错误、数据库查询失败等）
+     */
+    public BaseResponse<Page<QuestionBankVO>> handleFallback(@RequestBody QuestionBankQueryRequest questionBankQueryRequest,
+                                                             HttpServletRequest request, Throwable ex) {
+        // 可以返回本地数据或空数据
+        return ResultUtils.success(null);
+    }
+
+    /**
+     * listQuestionBankVOByPage 流控操作
+     * 限流：提示“系统压力过大，请耐心等待”
+     * 熔断：执行降级操作
+     */
+    public BaseResponse<Page<QuestionBankVO>> handleBlockException(@RequestBody QuestionBankQueryRequest questionBankQueryRequest,
+                                                                   HttpServletRequest request, BlockException ex) {
+        // 降级操作
+        if (ex instanceof DegradeException) {
+            return handleFallback(questionBankQueryRequest, request, ex);
+        }
+        // 限流操作
+        return ResultUtils.error(ErrorCode.SYSTEM_ERROR, "系统压力过大，请耐心等待");
+    }
+
 
     // endregion
 }
