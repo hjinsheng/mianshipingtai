@@ -29,6 +29,21 @@
       "name": "wx.open.appSecret",
       "type": "java.lang.String",
       "description": "Description for wx.open.appSecret."
+    },
+    {
+      "name": "blacklist.snapshot-path",
+      "type": "java.lang.String",
+      "description": "黑名单本地快照路径（相对应用运行目录），用于 Nacos 不可用时兜底。"
+    },
+    {
+      "name": "blacklist.nacos-timeout-ms",
+      "type": "java.lang.Long",
+      "description": "拉取 Nacos 黑名单配置的超时时间（毫秒）。"
+    },
+    {
+      "name": "blacklist.retry-interval-ms",
+      "type": "java.lang.Long",
+      "description": "订阅/拉取 Nacos 黑名单配置失败后的重试间隔（毫秒）。"
     }
   ]
 }

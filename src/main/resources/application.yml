@@ -122,6 +122,29 @@ spring:
     multipart:
       # 大小限制
       max-file-size: 10MB
+
+# Nacos 配置中心
+# 注意：项目使用 com.alibaba.boot:nacos-config-spring-boot-starter，
+# 属性前缀必须是 nacos.config（不能放在 spring.cloud.nacos 下）
+nacos:
+  config:
+    server-addr: 192.168.100.128:8848  # nacos 地址
+    # 不启用启动阶段预加载：黑名单由 NacosListener 自行拉取，避免 Nacos 不可用时影响启动
+    bootstrap:
+      enable: false
+    data-id: mianshi # 控制台填写的 Data ID
+    group: DEFAULT_GROUP # 控制台填写的 group
+    type: yaml # 选择的文件格式
+
+# 黑名单配置
+blacklist:
+  # 本地快照路径（相对应用运行目录），用于 Nacos 不可用时兜底
+  snapshot-path: blacklist/blackIpList.yml
+  # 拉取 Nacos 配置的超时时间（毫秒）
+  nacos-timeout-ms: 3000
+  # 订阅/拉取失败后的重试间隔（毫秒）
+  retry-interval-ms: 30000
+
 server:
   address: 0.0.0.0
   port: 8101
