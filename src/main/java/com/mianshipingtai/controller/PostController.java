@@ -2,7 +2,7 @@ package com.mianshipingtai.controller;
 
 import cn.hutool.json.JSONUtil;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
-import com.mianshipingtai.annotation.AuthCheck;
+import cn.dev33.satoken.annotation.SaCheckRole;
 import com.mianshipingtai.common.BaseResponse;
 import com.mianshipingtai.common.DeleteRequest;
 import com.mianshipingtai.common.ErrorCode;
@@ -110,7 +110,7 @@ public class PostController {
      * @return
      */
     @PostMapping("/update")
-    @AuthCheck(mustRole = UserConstant.ADMIN_ROLE)
+    @SaCheckRole(UserConstant.ADMIN_ROLE)
     public BaseResponse<Boolean> updatePost(@RequestBody PostUpdateRequest postUpdateRequest) {
         if (postUpdateRequest == null || postUpdateRequest.getId() <= 0) {
             throw new BusinessException(ErrorCode.PARAMS_ERROR);
@@ -156,7 +156,7 @@ public class PostController {
      * @return
      */
     @PostMapping("/list/page")
-    @AuthCheck(mustRole = UserConstant.ADMIN_ROLE)
+    @SaCheckRole(UserConstant.ADMIN_ROLE)
     public BaseResponse<Page<Post>> listPostByPage(@RequestBody PostQueryRequest postQueryRequest) {
         long current = postQueryRequest.getCurrent();
         long size = postQueryRequest.getPageSize();
